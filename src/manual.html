@@ -1,0 +1,252 @@
+QuickLZ C 1.5.x manual
+
+Last edited: 08-Jan-2011.
+
+Functions
+Flags
+Overlapping decompression
+Thread Safety
+Memory Requirements
+Architecture Compatibility
+Backwards Compatibility
+Sample code
+
+This manual covers the C version of the QuickLZ 1.5.x library. It consists of the two files quicklz.c and quicklz.h whose only dependency is string.h.
+
+QuickLZ 1.5.x supports three compression levels and optional streaming mode. Because of performance reasons, these settings cannot be given in runtime but must instead be defined through #define flags whereafter the library must be compiled.
+
+The API of version 1.5.x is the same as in version 1.4.x except that qlz_compress() and qlz_decompress() now take qlz_state_compress and qlz_state_decompress structs as argument instead of char *scratch buffers.
+
+Version 1.5.x is data compatible with version 1.4.x and version 1.4.x data compatible with version 1.5.x. Data compressed with one version can be decompressed with the other version, for all compression levels.
+
+Functions
+Following public functions exist:
+
+size_t qlz_compress(const void *source, char *destination, size_t size, qlz_state_compress *state_compress)
+Compress size amount of bytes of source and write the result to destination.
+
+The size argument must be between 1 and 232 - 1 on 64-bit architectures even though the size_t type is used.
+
+The destination buffer must be at least size + 400 bytes large because incompressible data may increase in size.
+
+The qlz_state_compress type is a struct defined in the beginning of the quicklz.h file and is used for temporary storage by the compression algorithm.
+
+If streaming mode is enabled, further issues apply; see the description of the QLZ_STREAMING_BUFFER flag.
+
+Return value: Size of compressed result.
+
+Note: The qlz_state_compress struct is large and should not be allocated in local function scope becuse it can lead to stack overflow:
+
+wrong	OK	OK
+main()
+{
+    qlz_state_compress state_compress;
+    ...
+}
+
+qlz_state_compress state_compress;
+main()
+{
+    ...
+}
+
+ 
+
+main()
+{
+    qlz_state_compress *state_compress = malloc(sizeof(qlz_state_compress));
+    ...
+}
+
+ 
+
+size_t qlz_decompress(const char *source, void *destination, qlz_state_decompress *state_decompress)
+Decompress source and write the result to destination.
+
+The qlz_state_decompress type is a struct defined in the beginning of the quicklz.h file and is used for temporary storage by the decompression algorithm.
+
+If streaming mode is enabled, further issues apply; see the description of the QLZ_STREAMING_BUFFER flag.
+
+Return value: Size of decompressed result.
+
+Note: For qlz_state_decompress the same allocation issues apply as for qlz_state_compress mentioned above.
+
+size_t qlz_size_decompressed(const char *source)
+Takes the first 9 bytes of compressed data as argument (header) and returns its decompressed size.
+
+The function can be used to allocate the correct amount of memory for decompression.
+
+size_t qlz_size_compressed(const char *source)
+Takes the first 9 bytes of compressed data as argument (header) and returns its entire compressed size.
+
+The function can be used to read a block of compressed data from a file or storage device in cases where the size of the block is unknown.
+
+int qlz_get_setting(int settings)
+This function gives access to source code constants that are not accessible when using QuickLZ in compiled form like a .dll library.
+
+Argument	Return value
+0	QLZ_COMPRESSION_LEVEL
+1	sizeof(qlz_state_compress)
+2	sizeof(qlz_state_decompress)
+3	QLZ_STREAMING_BUFFER
+6	1 if QLZ_MEMOMRY_SAFE is defined, otherwise 0
+7	QLZ_VERSION_MAJOR
+8	QLZ_VERSION_MINOR
+9	QLZ_VERSION_REVISION
+Flags
+The flags exist in the beginning of the quicklz.h file. They are surrounded by an #ifndef QLZ_COMPRESSION_LEVEL which enables possibility to define them from the outside like on the compiler command line (most commonly through the /D or -D option).
+
+Possible settings and the default settings are shown:
+
+#define QLZ_COMPRESSION_LEVEL 1
+//#define QLZ_COMPRESSION_LEVEL 2
+//#define QLZ_COMPRESSION_LEVEL 3
+This flag selects the compression level which can be 1, 2 or 3.
+
+Note that data must be decompressed with the same setting of QLZ_COMPRESSION_LEVEL as it was compressed.
+
+#define QLZ_STREAMING_BUFFER 0
+//#define QLZ_STREAMING_BUFFER 100000
+//#define QLZ_STREAMING_BUFFER 1000000
+Because LZ compression is based on finding repeated strings, compression ratio can degrade if a data entity is being split into smaller packets (less than 10 - 50 Kbytes) that are compressed individually. Setting QLZ_STREAMING_BUFFER to any non-zero value enables streaming mode which makes QuickLZ store a history buffer of QLZ_STREAMING_MODE bytes in size. The history buffer is stored in the state structs on both the compressing and decompressing site which increases their sizes. When enabled, following issues apply:
+
+Packets must be decompressed in the same order as they were compressed.
+
+The functions qlz_compress() and qlz_decompress() must be given each their state struct and their contents must be preserved across calls by the caller.
+
+The state structs must be initially zeroed out by the caller.
+
+There is no queue with flush or fetch functions; qlz_compress() generates a compressed packet which can be stored or sent to a decompressing site for immediate decompression.
+
+Note that data must be decompressed with the same setting of QLZ_STREAMING_BUFFER as it was compressed, which is why two easy-to-remember non-zero values are suggested in quicklz.h. Setting it much lower than 100000 may degrade compression ratio and setting it higher than 1000000 may not improve compression ratio further.
+
+//#define QLZ_MEMORY_SAFE
+When this flag is defined, decompression with qlz_decompress() cannot crash if fed with corrupted data. It ensures that neither memory access, read nor write can happen outside the following three byte intervals:
+
+[source ; source + qlz_size_compressed(source) - 1]
+[destination ; destination + qlz_size_decompressed(source) - 1]
+[state_decompress; state_decompress+ sizeof(qlz_state_decompress) - 1]
+
+Before decompression the caller must test if the return values of qlz_size_compressed() and qlz_size_decompressed() are within range of allocated memory. These functions are reading the compressed and decompressed size from a header located within the first 9 bytes of compressed data and is what qlz_decompress()is bounds testing against.
+
+If qlz_decompress() receives corrupted data with QLZ_MEMORY_SAFE defined, it will either return 0 or return qlz_size_decompressed(source) but with arbitrary decompressed data.
+
+Defining the flag decreases decompression speed in the order of 10-20%. The speed of compression is not affected.
+
+Note that the QLZ_MEMORY_SAFE flag is new in QuickLZ and should not be assumed exploit safe against maliciously manipulated data.
+
+Overlapping decompression
+QuickLZ 1.5.x supports overlapping decompression to save memory. Assume that d = (decompressed size) and c = (compressed size). Place compressed data at the rightmost end of a destination buffer of total size d + (d >> 3) + 400:
+← lower addresses	higher addresses →
+d + (d >> 3) + 400 - c bytes of space	c bytes of compressed data
+↑ destination
+The data can now be decompressed to the destination pointer and may overwrite a part of the compressed data. Note that the space d + (d >> 3) + 400 - c may evaluate to 0 for some kinds of data.
+
+#include "quicklz.h"
+
+int main()
+{
+    char *destination;
+    char original[] = "Test of overlapping decompression. Five, six, seven, eight, nine, fifteen, sixteen, seventeen, fifteen, sixteen, seventeen.";
+    int d = strlen(original);
+    qlz_state_compress *state_compress = (qlz_state_compress *)malloc(sizeof(qlz_state_compress));
+    qlz_state_decompress *state_decompress = (qlz_state_decompress *)malloc(sizeof(qlz_state_decompress));
+    char *compressed = (char *)malloc(d + 400);
+
+    int c = qlz_compress(original, compressed, d, state_compress);
+
+    destination = (char *)malloc(d + (d >> 3) + 400);
+    memmove(destination + d + (d >> 3) + 400 - c, compressed, c);
+
+    qlz_decompress(destination + d + (d >> 3) + 400 - c, destination, state_decompress);
+
+    destination[d] = 0;
+    printf("%s", destination);
+
+    return 0;
+}
+
+In most applications the compressing and decompressing site are separated. In this case the functions c = qlz_size_compressed(compressed) and d = qlz_size_decompressed(compressed) may be useful on the decompressing site when arranging the decompression.
+Thread Safety
+All functions are thread safe, but each thread must use its own state structs.
+Memory Requirements
+The exact value of sizeof(qlz_state_compress) and sizeof(qlz_state_decompress) depends on how the C compiler is packing various struct array in quicklz.h. Most commonly the sizes are the values given in the table below, plus the value of QLZ_STREAMING_BUFFER.
+
+sizeof(char *)	32 bits	64 bits
+QLZ_COMPRESSION_LEVEL
+
+1	2	3	1	2	3
+sizeof(qlz_state_compress)	36868	34820	266244	36872	67592	528392
+sizeof(qlz_state_decompress)	20484	34820	8	36872	67592	8
+Architecture Compatibility
+QuickLZ 1.5.x has been extensively tested and bounds checked on a variety of 32- and 64-bit architectures such as x86, x64, UltraSPARC, MIPS, Itanium, POWER, ARM, PA-RISC, Alpha, Cell and 68k. Data compressed on one architecture can be decompressed on any other architecture.
+
+It is required that sizeof(int) == 4 which is the case for the ILP32, LP64 and LLP64 data models.
+
+Sample code
+Simple compression and decompression when not in streaming mode:
+#include "quicklz.h"
+
+#if QLZ_STREAMING_BUFFER > 0
+    #error Define QLZ_STREAMING_BUFFER to 0 for this demo
+#endif
+
+int main ()
+{
+    qlz_state_compress *state_compress = (qlz_state_compress *)malloc(sizeof(qlz_state_compress));
+    qlz_state_decompress *state_decompress = (qlz_state_decompress *)malloc(sizeof(qlz_state_decompress));
+    char original[] = "LZ compression is based on finding repeated strings: Five, six, seven, eight, nine, fifteen, sixteen, seventeen, fifteen, sixteen, seventeen.";
+
+    // Always allocate size + 400 bytes for the destination buffer when compressing.
+    char *compressed = (char *)malloc(strlen(original) + 400);
+    char *decompressed = (char *)malloc(strlen(original));
+    int r;
+
+    r = qlz_compress(original, compressed, strlen(original), state_compress);
+    printf("Compressed %d bytes into %d bytes.\n", strlen(original), r);
+
+    r = qlz_decompress(compressed, decompressed, state_decompress);
+    printf("Decompressed back to %d bytes.\n", r);
+
+    return 0;
+}
+
+Example of compression and decompression when in streaming mode:
+#include "quicklz.h"
+
+#if QLZ_STREAMING_BUFFER == 0
+    #error Define QLZ_STREAMING_BUFFER to a non-zero value for this demo
+#endif
+
+int main ()
+{
+    qlz_state_compress *state_compress = (qlz_state_compress *)malloc(sizeof(qlz_state_compress));
+    qlz_state_decompress *state_decompress = (qlz_state_decompress *)malloc(sizeof(qlz_state_decompress));
+
+    // Allocate data buffers. 200 and 200 + 400 bytes should be sufficient for our test data packets.
+    char *compressed = (char *)malloc(200 + 400);
+    char *decompressed = (char *)malloc(200);
+
+    int o = 0;
+
+    // Zero out both states.
+    memset(state_compress, 0, sizeof(state_compress));
+    memset(state_decompress, 0, sizeof(state_decompress));
+
+    // Always decompress data in the same order as it was compressed. There is no requirement on destination address when decompressing
+    // even though we do it consecutively in this example using the o pointer.
+    qlz_compress("This is data packet number one, ", compressed, 32, state_compress);
+    o += qlz_decompress(compressed, decompressed, state_decompress);
+
+    qlz_compress("this is data packet number two, ", compressed, 32, state_compress);
+    o += qlz_decompress(compressed, decompressed + o, state_decompress);
+
+    qlz_compress("and finally data packet number three.", compressed, 37, state_compress);
+    o += qlz_decompress(compressed, decompressed + o, state_decompress);
+
+    // printf() needs 0-termination.
+    decompressed[o] = 0;
+    printf("Concatenated decompressed results: %s", decompressed);
+
+    return 0;
+}

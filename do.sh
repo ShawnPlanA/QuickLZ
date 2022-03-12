@@ -5,10 +5,10 @@ cd src;
 make clean;
 make;
 ls libquicklz.so;
-cd ..;
+//make install
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/shawn/QuickLZ
 
-
-cd sample;
+cd ../sample;
 make clean; make;
 ls;
 cd ..;
